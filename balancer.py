@@ -16,9 +16,8 @@ SERVERS = map(str.strip, config.get('VideoServers', 'servers').split(','))
 # A counter for distributing user requests based in a round-robin fashion
 POINTER = 0
 
-# Create a lock for Mutual exclusion
+# Create a lock for Mutual exclusion. Avoid several threads get access to the shared variable POINTER at exactly the same time
 lock = Lock()
-
 
 # Thread class which can return value
 class RequestThread(Thread):
@@ -98,7 +97,7 @@ def balancer_allocateStream(env):
             # Initiate the thread
             thread.start()
             
-            # Wait the thread to stop
+            # Wait for the thread to stop
             res = thread.join()
 
             # Release the lock
@@ -122,7 +121,8 @@ def balancer_allocateStream(env):
             lock.release()
             continue
 
-    # Send back a 500 error to client
+    # After execution of the loop above, if the balancer can't get any response from all the video servers, 
+    # then balancer sends back a 500 error response to client
     response_body = {"Error": {"detail":"Internal servers raise errors", "type":"500 Error"}}
     
     return generate_response('500', response_body)
