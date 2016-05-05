@@ -24,7 +24,7 @@ def application(env, start_response):
 
 def http_response(env):
     import time
-    time.sleep(50)
+    time.sleep(5)
     status_code = '200'
     response_body = {"url": "http://video1.neti.systems/svt1?token=12345", "secret":"abcdef"}
     headers = [('Content-Type', 'application/json')]

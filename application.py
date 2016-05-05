@@ -3,14 +3,14 @@
 # Author: Xin Han
 # Email: hxinhan@gmail.com
 
-from balancer import *
-
+from balancer import balancer_allocateStream, generate_response, config
 
 def application(env, start_response):
 
     PATH_INFO = env['PATH_INFO']
     REQUEST_METHOD = env['REQUEST_METHOD']
-
+    
+    # Parse client request
     if PATH_INFO == '/allocateStream' and REQUEST_METHOD == 'POST':
 
         status_code, headers, response_body = balancer_allocateStream(env) 

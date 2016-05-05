@@ -6,14 +6,35 @@
 import json
 import ConfigParser
 import requests
+from threading import Thread, Lock
 
 # Get video servers info from configuration file
 config = ConfigParser.ConfigParser()
 config.read("balancer.conf")
-SERVERS = map(str.strip, config.get('Video_Servers', 'servers').split(','))
+SERVERS = map(str.strip, config.get('VideoServers', 'servers').split(','))
 
 # A counter for distributing user requests based in a round-robin fashion
 POINTER = 0
+
+# Create a lock for Mutual exclusion
+lock = Lock()
+
+
+# Thread class which can return value
+class RequestThread(Thread):
+        
+    def __init__(self, group=None, target=None, name=None, args=(), kwargs={}, Verbose=None):
+        Thread.__init__(self, group, target, name, args, kwargs, Verbose)
+        self.__init___return = None
+                            
+    def run(self):
+        if self._Thread__target is not None:
+            self._return = self._Thread__target(*self._Thread__args, **self._Thread__kwargs)
+                                                            
+    def join(self):
+        Thread.join(self)
+        return self._return
+
 
 # Distribute requests in a round-robin fashion
 def round_robin():
@@ -22,8 +43,10 @@ def round_robin():
     
     index = POINTER % len(SERVERS)
     video_server_url = SERVERS[index]
-    
+    # Increase POINTER by one 
     POINTER = POINTER + 1
+
+    print POINTER
 
     return video_server_url
 
@@ -41,6 +64,15 @@ def generate_response(status_code, response_body):
     
     return status_code, headers, json.dumps(response_body)
 
+
+def allocateStream(url, headers, post_data):
+
+    # Send POST request to the chosen video server 
+    res = requests.post(url, headers = headers, timeout = 1, data = post_data) 
+    
+    return res
+
+
 # Load balancer's function for allocating stream
 def balancer_allocateStream(env):
 
@@ -49,40 +81,50 @@ def balancer_allocateStream(env):
     # Retrive json data from client's request
     post_data = env['wsgi.input'].read()
 
-    # Initiate a for-loop with the length of SERVERS list
+    # Initiate a for loop with the length of SERVERS list. 
+    # The loop will be terminated immediately, if balancer successfully gets a response from any video server
     for i in range(len(SERVERS)):        
-
+        
+        # Acquire the lock
+        lock.acquire()
+        
         # Get video server url based on Round-Robin
         video_server_url = round_robin()
 
-        # Delivery client request to selected video server based on round robin
         try:
-            # Send POST request to the chosen video server with maximum waiting time of 1 second
-            res = requests.post(video_server_url, headers = headers, timeout = 30, data = post_data) 
-
-        # Timeout exception is raised, try another video server instead
-        except requests.exceptions.Timeout:
-            continue
-
-        # Connection error is raised, try another video server instead
-        except requests.exceptions.ConnectionError:
-            continue
-
-        # If video server responds with a 500 error code, try another video server instead
-        if res.status_code == 500:
-            continue
-
-        # If no error occurs, then respond to client immediately
-        else:
+            # Create a thread
+            thread = RequestThread(target = allocateStream, args = (video_server_url, headers, post_data))
             
-            response_body = {}
-            # Remove "secret" key-value pairt from video server response
-            response_body['url'] = res.json()['url']
+            # Initiate the thread
+            thread.start()
             
-            return generate_response(str(res.status_code), response_body)
+            # Wait the thread to stop
+            res = thread.join()
+
+            # Release the lock
+            lock.release()
+        
+            # If video server responds with a 500 error code, try another video server instead
+            if res.status_code == 500:
+                continue
+
+            # If no error occurs, then send response to client immediately
+            else:
+                response_body = {}
+                # Remove "secret" key-value pairt from video server response
+                response_body['url'] = res.json()['url']
+            
+                return generate_response(str(res.status_code), response_body)
+
+        # If Timeout exception or Connection error is raised, try another video server instead 
+        except:
+            # Release the lock
+            lock.release()
+            continue
 
     # Send back a 500 error to client
     response_body = {"Error": {"detail":"Internal servers raise errors", "type":"500 Error"}}
+    
     return generate_response('500', response_body)
 
 
